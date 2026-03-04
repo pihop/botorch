@@ -206,6 +206,7 @@ def _gen_kernel_feature_map_rbf(
 @GenKernelFeatureMap.register(kernels.MaternKernel)
 def _gen_kernel_feature_map_matern(
     kernel: kernels.MaternKernel,
+    orthogonal=False,
     **kwargs: Any,
 ) -> KernelFeatureMap:
     r"""Generate random Fourier features for the Matern kernel.
@@ -233,16 +234,54 @@ def _gen_kernel_feature_map_matern(
         dtype = kernel.dtype
         device = kernel.device
         nu = torch.tensor(kernel.nu, device=device, dtype=dtype)
-        normals = draw_sobol_normal_samples(n=n, d=d, device=device, dtype=dtype)
+
+        if d < 20_000:
+            normals = draw_sobol_normal_samples(n=n, d=d, device=device, dtype=dtype)
+        else:
+            normals = torch.randn(torch.Size([n, d]), device=device, dtype=dtype)
         # For Matern kernels, we sample from a Gamma distribution based on nu
         return Gamma(nu, nu).rsample((n, 1)).rsqrt() * normals
 
-    return _gen_fourier_features(
-        kernel=kernel,
-        weight_generator=_weight_generator,
-        **kwargs,
-    )
+    def _weight_generator_orthogonal(shape: Size) -> Tensor:
+        try:
+            n, d = shape
+        except ValueError:
+            raise UnsupportedError(
+                f"Expected `shape` to be 2-dimensional, but {len(shape)=}."
+            )
 
+        dtype = kernel.dtype
+        device = kernel.device
+        nu = torch.tensor(kernel.nu, device=device, dtype=dtype)
+
+        num_blocks = (n + d - 1) // d
+        orthogonal_weights = []
+
+        for _ in range(num_blocks):
+            W = torch.randn(d, d, device=device, dtype=dtype)
+            q, r = torch.linalg.qr(W)
+            d_diag = torch.diag(r).sign()
+            q *= d_diag
+            orthogonal_weights.append(q)
+
+        normals = torch.cat(orthogonal_weights, dim=0)[:n]
+        chi_sq_samples = torch.randn(n, d, device=device, dtype=dtype).pow(2).sum(dim=1, keepdim=True).sqrt()
+        normals = normals * chi_sq_samples
+        return Gamma(nu, nu).rsample((n, 1)).rsqrt() * normals
+
+
+    if orthogonal:
+        return _gen_fourier_features(
+            kernel=kernel,
+            weight_generator=_weight_generator_orthogonal,
+            **kwargs,
+        )
+    else:
+        return _gen_fourier_features(
+            kernel=kernel,
+            weight_generator=_weight_generator,
+            **kwargs,
+        )
 
 @GenKernelFeatureMap.register(kernels.ScaleKernel)
 def _gen_kernel_feature_map_scale(

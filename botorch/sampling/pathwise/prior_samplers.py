@@ -123,12 +123,21 @@ def _draw_kernel_feature_paths_fallback(
     )
     if weight_generator is None:
         # weight is sample_shape x batch_shape x num_outputs
-        weight = draw_sobol_normal_samples(
-            n=sample_shape.numel() * covar_module.batch_shape.numel(),
-            d=feature_map.output_shape.numel(),
-            device=covar_module.device,
-            dtype=covar_module.dtype,
-        ).reshape(weight_shape)
+        n = sample_shape.numel() * covar_module.batch_shape.numel()
+        d = feature_map.output_shape.numel()
+        if d < 20_000:
+            weight = draw_sobol_normal_samples(
+                n=n,
+                d=feature_map.output_shape.numel(),
+                device=covar_module.device,
+                dtype=covar_module.dtype,
+            ).reshape(weight_shape)
+        else:
+            weight = torch.randn(
+                torch.Size([n, feature_map.output_shape.numel()]),
+                device=covar_module.device,
+                dtype=covar_module.dtype
+            ).reshape(weight_shape)
     else:
         weight = weight_generator(weight_shape).to(
             device=covar_module.device, dtype=covar_module.dtype
