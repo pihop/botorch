@@ -113,9 +113,9 @@ class DirectSumFeatureMap(FeatureMap, ModuleListMixin[FeatureMap]):
             output_transform: Optional transform to apply to outputs.
         """
         FeatureMap.__init__(self)
-        ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
         self.input_transform = input_transform
         self.output_transform = output_transform
+        ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
 
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
         blocks = []
@@ -212,6 +212,23 @@ class DirectSumFeatureMap(FeatureMap, ModuleListMixin[FeatureMap]):
             )
         return next(iter(batch_shapes)) if batch_shapes else Size([])
 
+    @property
+    def device(self) -> torch.device | None:
+        devices = {feature_map.device for feature_map in self}
+        devices.discard(None)
+        if len(devices) > 1:
+            raise UnsupportedError(f"Feature maps must be colocated, but {devices=}.")
+        return next(iter(devices)) if devices else None
+
+    @property
+    def dtype(self) -> torch.dtype | None:
+        dtypes = {feature_map.dtype for feature_map in self}
+        dtypes.discard(None)
+        if len(dtypes) > 1:
+            raise UnsupportedError(
+                f"Feature maps must have the same data type, but {dtypes=}."
+            )
+        return next(iter(dtypes)) if dtypes else None
 
 class SparseDirectSumFeatureMap(DirectSumFeatureMap):
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
