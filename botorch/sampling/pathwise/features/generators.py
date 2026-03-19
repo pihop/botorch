@@ -255,18 +255,21 @@ def _gen_kernel_feature_map_matern(
         nu = torch.tensor(kernel.nu, device=device, dtype=dtype)
 
         num_blocks = (n + d - 1) // d
-        orthogonal_weights = []
 
-        for _ in range(num_blocks):
-            W = torch.randn(d, d, device=device, dtype=dtype)
-            q, r = torch.linalg.qr(W)
-            d_diag = torch.diag(r).sign()
-            q *= d_diag
-            orthogonal_weights.append(q)
+        # Generate all random blocks at once in a 3D tensor
+        W = torch.randn(num_blocks, d, d, device=device, dtype=dtype)
+        q, r = torch.linalg.qr(W)
 
-        normals = torch.cat(orthogonal_weights, dim=0)[:n]
+        # Correct the signs of the orthogonal matrices
+        d_diag = torch.diagonal(r, dim1=-2, dim2=-1).sign()
+        q *= d_diag.unsqueeze(-2)
+
+        # Flatten the blocks down to 2D and truncate to exactly 'n' features
+        normals = q.reshape(-1, d)[:n]
+
         chi_sq_samples = torch.randn(n, d, device=device, dtype=dtype).pow(2).sum(dim=1, keepdim=True).sqrt()
         normals = normals * chi_sq_samples
+
         return Gamma(nu, nu).rsample((n, 1)).rsqrt() * normals
 
 
