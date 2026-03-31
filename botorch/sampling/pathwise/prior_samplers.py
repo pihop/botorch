@@ -94,6 +94,7 @@ def _draw_kernel_feature_paths_fallback(
     output_transform: TOutputTransform | None = None,
     weight_generator: Callable[[Size], Tensor] | None = None,
     is_ensemble: bool = False,
+    chunk_size: int | None = None,
     **kwargs: Any,
 ) -> GeneralizedLinearPath:
     r"""Generate sample paths from a kernel-based prior using feature maps.
@@ -112,6 +113,8 @@ def _draw_kernel_feature_paths_fallback(
         output_transform: Optional transform applied to output after feature generation.
         weight_generator: Optional callable to generate random weights. If None,
             uses Sobol sequences to generate normally distributed weights.
+        chunk_size: If provided, passed to :class:`GeneralizedLinearPath` to evaluate
+            the feature map in chunks of this many points, reducing peak memory.
         **kwargs: Additional arguments passed to :func:`map_generator`.
     """
     feature_map = map_generator(kernel=covar_module, **kwargs)
@@ -150,6 +153,7 @@ def _draw_kernel_feature_paths_fallback(
         input_transform=input_transform,
         output_transform=output_transform,
         is_ensemble=is_ensemble,
+        chunk_size=chunk_size,
     )
 
 

@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+import torch
 from botorch.exceptions.errors import UnsupportedError
 from botorch.sampling.pathwise.features import FeatureMap
 from botorch.sampling.pathwise.utils import (
@@ -153,6 +154,7 @@ class GeneralizedLinearPath(SamplePath):
         output_transform: TOutputTransform | None = None,
         is_ensemble: bool = False,
         ensemble_as_batch: bool = False,
+        chunk_size: int | None = None,
     ):
         r"""Initializes a GeneralizedLinearPath instance.
 
@@ -174,6 +176,10 @@ class GeneralizedLinearPath(SamplePath):
                 dimension or not. If ``True``, the ensemble dimension is treated as a
                 batch dimension, which allows for the joint optimization of all members
                 of the ensemble.
+            chunk_size: If provided, evaluates the feature map in chunks of this many
+                points along the penultimate dimension, reducing peak memory from
+                ``N x D`` to ``chunk_size x D`` at the cost of extra kernel launches.
+                ``None`` (default) disables chunking.
         """
         super().__init__()
         self.feature_map = feature_map
@@ -186,6 +192,16 @@ class GeneralizedLinearPath(SamplePath):
         self.output_transform = output_transform
         self.is_ensemble = is_ensemble
         self.ensemble_as_batch = ensemble_as_batch
+        self.chunk_size = chunk_size
+
+    def _eval_features(self, x: Tensor, **kwargs) -> Tensor:
+        """Evaluates ``feature_map(x) @ weight`` for a single chunk of points."""
+        features = self.feature_map(x, **kwargs)
+        output = (features @ self.weight.unsqueeze(-1)).squeeze(-1)
+        ndim = len(self.feature_map.output_shape)
+        if ndim > 1:  # sum over the remaining feature dimensions
+            output = output.sum(dim=list(range(-ndim + 1, 0)))
+        return output
 
     def forward(self, x: Tensor, **kwargs) -> Tensor:
         """Evaluates the path.
@@ -207,11 +223,14 @@ class GeneralizedLinearPath(SamplePath):
             # assuming that the ensembling dimension is added after (n, d), but
             # before the other batch dimensions, starting from the left.
             x = x.unsqueeze(-3)
-        features = self.feature_map(x, **kwargs)
-        output = (features @ self.weight.unsqueeze(-1)).squeeze(-1)
-        ndim = len(self.feature_map.output_shape)
-        if ndim > 1:  # sum over the remaining feature dimensions
-            output = output.sum(dim=list(range(-ndim + 1, 0)))
+
+        if self.chunk_size is None:
+            output = self._eval_features(x, **kwargs)
+        else:
+            output = torch.cat(
+                [self._eval_features(chunk, **kwargs) for chunk in x.split(self.chunk_size, dim=-2)],
+                dim=-1,
+            )
 
         return output if self.bias_module is None else output + self.bias_module(x)
 

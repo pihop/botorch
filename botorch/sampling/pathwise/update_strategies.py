@@ -86,9 +86,14 @@ def _gaussian_update_exact(
         noise_values = torch.randn(
             noise_shape, device=sample_values.device, dtype=sample_values.dtype
         )
-        noise_values = (
-            noise_covariance.cholesky() @ noise_values.unsqueeze(-1)
-        ).squeeze(-1)
+        from linear_operator.operators import DiagLinearOperator
+        if isinstance(noise_covariance, DiagLinearOperator):
+            # Diagonal noise: sqrt(diag) * z is equivalent to L_noise @ z
+            noise_values = noise_values * noise_covariance.diagonal(dim1=-1, dim2=-2).sqrt()
+        else:
+            noise_values = (
+                noise_covariance.cholesky() @ noise_values.unsqueeze(-1)
+            ).squeeze(-1)
         sample_values = sample_values + noise_values
         scale_tril = (
             SumLinearOperator(kernel(points), noise_covariance).cholesky()
@@ -98,7 +103,9 @@ def _gaussian_update_exact(
 
     # Solve for `Cov(y, y)^{-1}(y - f(X) - ε)`
     errors = target_values - sample_values
-    weight = torch.cholesky_solve(errors.unsqueeze(-1), scale_tril.to_dense())
+    L_dense = scale_tril.to_dense() if isinstance(scale_tril, LinearOperator) else scale_tril
+    weight = torch.cholesky_solve(errors.unsqueeze(-1), L_dense)
+
 
     # Define update feature map and paths
     feature_map = KernelEvaluationMap(
