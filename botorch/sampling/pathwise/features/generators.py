@@ -43,7 +43,7 @@ from botorch.utils.sampling import draw_sobol_normal_samples
 from botorch.utils.types import DEFAULT
 from gpytorch import kernels
 from torch import Size, Tensor
-from torch.distributions import Gamma
+from torch.distributions import Gamma, Chi2
 
 r"""Type definition for feature map generators.
 
@@ -235,7 +235,7 @@ def _gen_kernel_feature_map_matern(
         device = kernel.device
         nu = torch.tensor(kernel.nu, device=device, dtype=dtype)
 
-        if d < 20_000:
+        if d < 20_000 and n <= 16_384:
             normals = draw_sobol_normal_samples(n=n, d=d, device=device, dtype=dtype)
         else:
             normals = torch.randn(torch.Size([n, d]), device=device, dtype=dtype)
@@ -267,7 +267,7 @@ def _gen_kernel_feature_map_matern(
         # Flatten the blocks down to 2D and truncate to exactly 'n' features
         normals = q.reshape(-1, d)[:n]
 
-        chi_sq_samples = torch.randn(n, d, device=device, dtype=dtype).pow(2).sum(dim=1, keepdim=True).sqrt()
+        chi_sq_samples = Chi2(df=torch.tensor(float(d), device=device, dtype=dtype)).rsample((n, 1)).sqrt()
         normals = normals * chi_sq_samples
 
         return Gamma(nu, nu).rsample((n, 1)).rsqrt() * normals

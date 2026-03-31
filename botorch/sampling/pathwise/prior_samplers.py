@@ -125,7 +125,7 @@ def _draw_kernel_feature_paths_fallback(
         # weight is sample_shape x batch_shape x num_outputs
         n = sample_shape.numel() * covar_module.batch_shape.numel()
         d = feature_map.output_shape.numel()
-        if d < 20_000:
+        if d < 20_000 and n <= 16_384:
             weight = draw_sobol_normal_samples(
                 n=n,
                 d=feature_map.output_shape.numel(),
