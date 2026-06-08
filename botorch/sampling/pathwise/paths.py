@@ -197,8 +197,16 @@ class GeneralizedLinearPath(SamplePath):
     def _eval_features(self, x: Tensor, **kwargs) -> Tensor:
         """Evaluates ``feature_map(x) @ weight`` for a single chunk of points."""
         features = self.feature_map(x, **kwargs)
-        output = (features @ self.weight.unsqueeze(-1)).squeeze(-1)
         ndim = len(self.feature_map.output_shape)
+        w = self.weight
+        if ndim == 1 and w.dim() == 2 and features.dim() == 2:
+            # Memory-efficient path: avoid broadcasting K over the sample dimension.
+            # `features @ w.unsqueeze(-1)` forces CPU to expand (q, D) -> (S, q, D).
+            # `w @ features.mT` is (S, D) @ (D, q) = (S, q) with no expansion.
+            if not isinstance(features, Tensor):
+                features = features.to_dense()
+            return w @ features.mT
+        output = (features @ w.unsqueeze(-1)).squeeze(-1)
         if ndim > 1:  # sum over the remaining feature dimensions
             output = output.sum(dim=list(range(-ndim + 1, 0)))
         return output
